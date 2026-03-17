@@ -54,10 +54,23 @@ step 1 "System update & dependencies..."
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-# Wait for any running apt/dpkg to finish (fresh servers often run unattended-upgrades)
+# Stop unattended-upgrades if running (blocks apt on fresh servers for minutes)
+systemctl stop unattended-upgrades 2>/dev/null || true
+systemctl disable unattended-upgrades 2>/dev/null || true
+
+# Wait for any remaining apt/dpkg lock (max 120s)
+WAIT=0
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-    warn "Waiting for dpkg lock to be released..."
-    sleep 5
+    if [ $WAIT -eq 0 ]; then warn "Waiting for dpkg lock..."; fi
+    sleep 3
+    WAIT=$((WAIT + 3))
+    if [ $WAIT -ge 120 ]; then
+        warn "Force-releasing dpkg lock after ${WAIT}s"
+        kill -9 "$(fuser /var/lib/dpkg/lock-frontend 2>/dev/null)" 2>/dev/null || true
+        rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock
+        dpkg --configure -a 2>/dev/null || true
+        break
+    fi
 done
 
 apt-get update -qq
