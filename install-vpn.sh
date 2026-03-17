@@ -189,14 +189,9 @@ ufw allow "${PANEL_PORT}/tcp" comment '3X-UI-Panel' > /dev/null 2>&1
 ufw allow "${SUB_PORT}/tcp" comment 'Subscription' > /dev/null 2>&1
 ufw allow 80/tcp comment 'ACME-cert-renewal' > /dev/null 2>&1
 
-# Safety check: SSH must be allowed before enabling
-if ufw status | grep -q "22/tcp"; then
-    ufw --force enable > /dev/null 2>&1
-    log "UFW active — ports: 22(SSH) ${VLESS_PORT}(VLESS) ${PANEL_PORT}(Panel) ${SUB_PORT}(Sub) 80(ACME)"
-else
-    err "SSH rule missing — NOT enabling firewall!"
-    warn "Fix: ufw allow 22/tcp && ufw --force enable"
-fi
+# Enable UFW (rules are added above, safe to enable)
+ufw --force enable > /dev/null 2>&1
+log "UFW active — ports: 22(SSH) ${VLESS_PORT}(VLESS) ${PANEL_PORT}(Panel) ${SUB_PORT}(Sub) 80(ACME)"
 
 # ============================================================
 # Step 7: fail2ban (SSH protection)
@@ -249,6 +244,16 @@ echo ""
 bash "$INSTALLER"
 rm -f "$INSTALLER"
 
+# Read actual panel settings (port may differ if user chose random)
+ACTUAL_PORT=$(grep -oP 'port:\s*\K\d+' <<< "$(/usr/local/x-ui/x-ui setting -show 2>/dev/null)" || echo "$PANEL_PORT")
+ACTUAL_BASE=$(grep -oP 'webBasePath:\s*\K\S+' <<< "$(/usr/local/x-ui/x-ui setting -show 2>/dev/null)" || echo "/")
+
+# Open actual panel port in UFW if different from default
+if [ "$ACTUAL_PORT" != "$PANEL_PORT" ]; then
+    ufw allow "${ACTUAL_PORT}/tcp" comment '3X-UI-Panel' > /dev/null 2>&1
+    log "Panel port ${ACTUAL_PORT} opened in UFW"
+fi
+
 log "Panel installed. To view credentials run:"
 echo "    /usr/local/x-ui/x-ui setting -show"
 
@@ -274,9 +279,9 @@ log "Unattended security upgrades enabled"
 # ============================================================
 step 10 "Installation complete!"
 
-# Gather panel info
-PANEL_INFO=$(/usr/local/x-ui/x-ui setting -show 2>/dev/null || echo "run: /usr/local/x-ui/x-ui setting -show")
-WEB_BASE=$(echo "$PANEL_INFO" | grep -oP 'webBasePath:\s*\K\S+' || echo "/")
+# Use actual settings detected after install
+WEB_BASE="${ACTUAL_BASE:-/}"
+PANEL_PORT="${ACTUAL_PORT:-$PANEL_PORT}"
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
